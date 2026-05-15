@@ -1,44 +1,69 @@
-// ✅ Video Info + Download Link Route
-app.get("/api", async (req, res) => {
-  const url = req.query.url;
+const express = require("express");
+const cors = require("cors");
+const yts = require("yt-search");
+const ytdl = require("@distube/ytdl-core");
 
-  if (!url) return res.status(400).json({
-    error: "URL missing",
-    example: "/api?url=https://youtu.be/VIDEO_ID"
+const app = express();
+app.use(cors());
+
+app.get("/", (req, res) => {
+  res.json({
+    status: "✅ Running",
+    api_name: "YT Rocky API",
+    author: "Rocky Chowdhury",
+    endpoints: {
+      search: "/yt?search=QUERY",
+      download: "/api?url=YOUTUBE_URL"
+    }
   });
+});
+
+// ✅ Search
+app.get("/yt", async (req, res) => {
+  const query = req.query.search;
+  if (!query) return res.status(400).json({ error: "Query missing" });
 
   try {
-    let videoId = "";
-    if (url.includes("youtu.be/")) {
-      videoId = url.split("youtu.be/")[1].split("?")[0];
-    } else if (url.includes("v=")) {
-      videoId = url.split("v=")[1].split("&")[0];
-    } else {
-      videoId = url.trim();
-    }
-
-    const r = await yts({ videoId });
-
-    // ✅ নতুন download services
-    const downloads = [
-      `https://api.downloadsound.cloud/video/${videoId}`,
-      `https://yt-download.org/api/button/mp4/${videoId}`,
-      `https://loader.to/api/button/?url=https://youtube.com/watch?v=${videoId}&f=mp4`
-    ];
-
-    res.json({
-      title: r.title,
-      url: r.url,
-      thumbnail: r.thumbnail,
-      duration: r.timestamp,
-      views: r.views,
-      author: r.author.name,
-      downloadUrl: downloads[0],
-      downloadUrl2: downloads[1],
-      downloadUrl3: downloads[2]
-    });
-
+    const r = await yts(query);
+    const videos = r.videos.slice(0, 5).map(v => ({
+      title: v.title,
+      time: v.timestamp,
+      thumbnail: v.thumbnail,
+      url: v.url,
+      views: v.views,
+      channelName: v.author.name
+    }));
+    res.json(videos);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ✅ Download Link
+app.get("/api", async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).json({ error: "URL missing" });
+
+  try {
+    const info = await ytdl.getInfo(url);
+    const format = ytdl.chooseFormat(info.formats, {
+      quality: "highestvideo",
+      filter: "videoandaudio"
+    });
+
+    res.json({
+      title: info.videoDetails.title,
+      thumbnail: info.videoDetails.thumbnails?.slice(-1)[0]?.url,
+      duration: info.videoDetails.lengthSeconds,
+      views: info.videoDetails.viewCount,
+      author: info.videoDetails.author.name,
+      downloadUrl: format.url
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`YT Rocky API on port ${PORT}`));
+module.exports = app;
