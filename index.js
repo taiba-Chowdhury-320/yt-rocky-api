@@ -1,23 +1,16 @@
 const express = require("express");
 const cors = require("cors");
 const yts = require("yt-search");
-const { exec } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+const axios = require("axios");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 
 app.get("/", (req, res) => {
   res.json({
     status: "✅ Running",
     api_name: "YT Rocky API",
-    author: "Rocky Chowdhury",
-    endpoints: {
-      search: "/yt?search=QUERY",
-      download: "/api?url=YOUTUBE_URL"
-    }
+    author: "Rocky Chowdhury"
   });
 });
 
@@ -41,57 +34,65 @@ app.get("/yt", async (req, res) => {
   }
 });
 
-// ✅ Download - yt-dlp ব্যবহার করে
+// ✅ Download - RyzenDesu API use করে
 app.get("/api", async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).json({ error: "URL missing" });
 
   try {
-    // yt-dlp দিয়ে direct download URL বের করো
-    const command = `yt-dlp -f "best[ext=mp4][height<=480]" --get-url "${url}"`;
-    
-    exec(command, { timeout: 30000 }, async (error, stdout, stderr) => {
-      if (error || !stdout.trim()) {
-        // fallback: yt-search থেকে info নাও
-        let videoId = "";
-        if (url.includes("youtu.be/")) {
-          videoId = url.split("youtu.be/")[1].split("?")[0];
-        } else if (url.includes("v=")) {
-          videoId = url.split("v=")[1].split("&")[0];
+    let videoId = "";
+    if (url.includes("youtu.be/")) {
+      videoId = url.split("youtu.be/")[1].split("?")[0];
+    } else if (url.includes("v=")) {
+      videoId = url.split("v=")[1].split("&")[0];
+    }
+
+    const fullUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const encoded = encodeURIComponent(fullUrl);
+
+    // RyzenDesu API try করো
+    let downloadUrl = null;
+
+    try {
+      const r1 = await axios.get(
+        `https://api.ryzendesu.vip/api/downloader/ytmp4?url=${encoded}`,
+        { timeout: 15000 }
+      );
+      downloadUrl = r1.data?.data?.url || r1.data?.url || null;
+    } catch(e) {}
+
+    // Fallback: y2meta style
+    if (!downloadUrl) {
+      try {
+        const r2 = await axios.post(
+          "https://www.y2meta.com/mates/analyzeV2/ajax",
+          `query=${encoded}&vt=home`,
+          {
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            timeout: 15000
+          }
+        );
+        const links = r2.data?.links?.mp4;
+        if (links) {
+          const key = Object.keys(links)[0];
+          downloadUrl = links[key]?.url || null;
         }
-        const r = await yts({ videoId });
-        return res.json({
-          title: r.title,
-          thumbnail: r.thumbnail,
-          duration: r.timestamp,
-          views: r.views,
-          author: r.author.name,
-          downloadUrl: null,
-          error: "yt-dlp failed"
-        });
-      }
+      } catch(e) {}
+    }
 
-      const downloadUrl = stdout.trim().split("\n")[0];
+    // Video info
+    const info = await yts({ videoId });
 
-      // Video info
-      let videoId = "";
-      if (url.includes("youtu.be/")) {
-        videoId = url.split("youtu.be/")[1].split("?")[0];
-      } else if (url.includes("v=")) {
-        videoId = url.split("v=")[1].split("&")[0];
-      }
-
-      const r = await yts({ videoId });
-
-      res.json({
-        title: r.title,
-        thumbnail: r.thumbnail,
-        duration: r.timestamp,
-        views: r.views,
-        author: r.author.name,
-        downloadUrl: downloadUrl
-      });
+    res.json({
+      title: info.title,
+      thumbnail: info.thumbnail,
+      duration: info.timestamp,
+      views: info.views,
+      author: info.author.name,
+      url: fullUrl,
+      downloadUrl: downloadUrl
     });
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
