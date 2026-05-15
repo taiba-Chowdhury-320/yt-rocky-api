@@ -6,11 +6,17 @@ const axios = require("axios");
 const app = express();
 app.use(cors());
 
+const RAPID_KEY = "59e10dd197mshb490a9bab23a36dp102ad9jsna74fceef3523";
+
 app.get("/", (req, res) => {
   res.json({
     status: "✅ Running",
     api_name: "YT Rocky API",
-    author: "Rocky Chowdhury"
+    author: "Rocky Chowdhury",
+    endpoints: {
+      search: "/yt?search=QUERY",
+      download: "/api?url=YOUTUBE_URL"
+    }
   });
 });
 
@@ -34,53 +40,54 @@ app.get("/yt", async (req, res) => {
   }
 });
 
-// ✅ Download - RyzenDesu API use করে
+// ✅ Download via RapidAPI
 app.get("/api", async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).json({ error: "URL missing" });
 
   try {
+    // Extract video ID
     let videoId = "";
     if (url.includes("youtu.be/")) {
       videoId = url.split("youtu.be/")[1].split("?")[0];
     } else if (url.includes("v=")) {
-      videoId = url.split("v=")[1].split("&")[0];
+      videoId = new URL(url).searchParams.get("v");
     }
+    if (!videoId) throw new Error("Invalid YouTube URL");
 
-    const fullUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const encoded = encodeURIComponent(fullUrl);
+    // RapidAPI - Youtube Mp4 by Opachi
+    const rapidRes = await axios.get(
+      `https://youtube-mp41.p.rapidapi.com/download`,
+      {
+        params: { id: videoId },
+        headers: {
+          "x-rapidapi-key": RAPID_KEY,
+          "x-rapidapi-host": "youtube-mp41.p.rapidapi.com"
+        },
+        timeout: 25000
+      }
+    );
 
-    // RyzenDesu API try করো
-    let downloadUrl = null;
+    let downloadUrl = rapidRes.data?.url || null;
 
-    try {
-      const r1 = await axios.get(
-        `https://api.ryzendesu.vip/api/downloader/ytmp4?url=${encoded}`,
-        { timeout: 15000 }
-      );
-      downloadUrl = r1.data?.data?.url || r1.data?.url || null;
-    } catch(e) {}
-
-    // Fallback: y2meta style
-    if (!downloadUrl) {
-      try {
-        const r2 = await axios.post(
-          "https://www.y2meta.com/mates/analyzeV2/ajax",
-          `query=${encoded}&vt=home`,
-          {
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            timeout: 15000
-          }
-        );
-        const links = r2.data?.links?.mp4;
-        if (links) {
-          const key = Object.keys(links)[0];
-          downloadUrl = links[key]?.url || null;
+    // If processing, wait and retry once
+    if (!downloadUrl && rapidRes.data?.status === "processing") {
+      await new Promise(r => setTimeout(r, 5000));
+      const retry = await axios.get(
+        `https://youtube-mp41.p.rapidapi.com/download`,
+        {
+          params: { id: videoId },
+          headers: {
+            "x-rapidapi-key": RAPID_KEY,
+            "x-rapidapi-host": "youtube-mp41.p.rapidapi.com"
+          },
+          timeout: 25000
         }
-      } catch(e) {}
+      );
+      downloadUrl = retry.data?.url || null;
     }
 
-    // Video info
+    // Get video info
     const info = await yts({ videoId });
 
     res.json({
@@ -89,7 +96,7 @@ app.get("/api", async (req, res) => {
       duration: info.timestamp,
       views: info.views,
       author: info.author.name,
-      url: fullUrl,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
       downloadUrl: downloadUrl
     });
 
@@ -99,5 +106,5 @@ app.get("/api", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`YT Rocky API on port ${PORT}`));
+app.listen(PORT, () => console.log(`YT Rocky API running on port ${PORT}`));
 module.exports = app;
